@@ -22,15 +22,15 @@ install_etcd() {
     echo "Install Etcd Operator"
 
     # Install etcd operator pre-reqs.
-    kubectl create -f etcd/etcd-rbac.yaml
+    kubectl create -f ./test/etcd/etcd-rbac.yaml
     # Install etcd operator.
-    kubectl create -f etcd/etcd-operator.yaml
+    kubectl create -f ./test/etcd/etcd-operator.yaml
 
     # Wait for etcd operator to be ready.
     until kubectl -n default get deployment etcd-operator --no-headers -o go-template='{{.status.readyReplicas}}' | grep -q 1; do sleep 3; done
 
     # Install etcd cluster.
-    kubectl create -f etcd/etcd-cluster.yaml
+    kubectl create -f ./test/etcd/etcd-cluster.yaml
 
     # Wait for etcd cluster to be ready.
     until kubectl -n default get pod -l app=etcd -l etcd_cluster=etcd -o go-template='{{range .items}}{{.status.phase}}{{end}}' | grep -q Running; do sleep 3; done
