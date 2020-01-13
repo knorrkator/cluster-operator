@@ -34,7 +34,6 @@ install_etcd() {
 
     # Wait for etcd cluster to be ready.
     until kubectl -n default get pod -l app=etcd -l etcd_cluster=etcd -o go-template='{{range .items}}{{.status.phase}}{{end}}' | grep -q Running; do sleep 3; done
-
     echo
 }
 
