@@ -140,48 +140,43 @@ func (s *Deployment) createConfigMap() error {
 	return nil
 }
 
+// configFromSpec generates config entries for the given major version of the
+// node container and CSI spec required.
+//
+//     Config set in DaemonSet env vars:
+//       - HOSTNAME (reads from spec.nodeName)
+//       - ADVERTISE_IP (reads from status.podIP)
+//       - BOOTSTRAP_USERNAME, BOOTSTRAP_PASSWORD (reads from secret)
 func configFromSpec(spec storageosv1.StorageOSClusterSpec, csiv1 bool, nodev2 bool) map[string]string {
+	if nodev2 {
+		return v2ConfigFromSpec(spec)
+	}
+	return v1ConfigFromSpec(spec, csiv1)
+}
 
+func v1ConfigFromSpec(spec storageosv1.StorageOSClusterSpec, csiv1 bool) map[string]string {
 	config := make(map[string]string)
 
-	// Config set in DaemonSet env vars:
-	//   - HOSTNAME (reads from spec.nodeName)
-	//   - ADVERTISE_IP (reads from status.podIP)
-	//   - BOOTSTRAP_USERNAME, BOOTSTRAP_PASSWORD (reads from secret)
-
 	// Etcd endpoint, and join for V1.
-	switch nodev2 {
-	case true:
-		// ETCD_ENDPOINTS must be set to a comma separated list of endpoints.
-		config[etcdEndpointsEnvVar] = spec.KVBackend.Address
-	case false:
-		// Join must be set.
-		config[joinEnvVar] = spec.Join
+	// Join must be set.
+	config[joinEnvVar] = spec.Join
 
-		// If external etcd is enabled, KV_BACKEND must be set to "etcd" and
-		// KV_ADDRESS set to a comma separated list of endpoints.
-		if spec.KVBackend.Backend != "" {
-			config[kvBackendEnvVar] = spec.KVBackend.Backend
-		}
-		if spec.KVBackend.Address != "" {
-			config[kvAddrEnvVar] = spec.KVBackend.Address
-		}
+	// If external etcd is enabled, KV_BACKEND must be set to "etcd" and
+	// KV_ADDRESS set to a comma separated list of endpoints.
+	if spec.KVBackend.Backend != "" {
+		config[kvBackendEnvVar] = spec.KVBackend.Backend
+	}
+	if spec.KVBackend.Address != "" {
+		config[kvAddrEnvVar] = spec.KVBackend.Address
 	}
 
 	// Append Etcd TLS config, if given.  Volumes are created in Podspec.
 	if spec.TLSEtcdSecretRefName != "" && spec.TLSEtcdSecretRefNamespace != "" {
-		config = addEtcdTLSConfig(config, nodev2)
+		config = addEtcdTLSConfig(config, false)
 	}
 
 	// Always show telemetry and feature options to ensure they're visble.
 	config[disableTelemetryEnvVar] = strconv.FormatBool(spec.DisableTelemetry)
-
-	// TODO: separte CR items for version check and crash reports.  Use
-	// Telemetry to enable/disable everything for now.
-	if nodev2 {
-		config[disableVersionCheckEnvVar] = strconv.FormatBool(spec.DisableTelemetry)
-		config[disableCrashReportingEnvVar] = strconv.FormatBool(spec.DisableTelemetry)
-	}
 
 	// Features
 	config[disableFencingEnvVar] = strconv.FormatBool(spec.DisableFencing)
@@ -195,14 +190,16 @@ func configFromSpec(spec storageosv1.StorageOSClusterSpec, csiv1 bool, nodev2 bo
 		config[forceTCMUEnvVar] = strconv.FormatBool(spec.ForceTCMU)
 	}
 
-	switch nodev2 {
-	case true:
-		config[v2NamespaceEnvVar] = spec.GetResourceNS()
-	case false:
-		config[v1NamespaceEnvVar] = spec.GetResourceNS()
-	}
+	config[v1NamespaceEnvVar] = spec.GetResourceNS()
+
 	if spec.K8sDistro != "" {
 		config[k8sDistroEnvVar] = spec.K8sDistro
+	}
+
+	// CSI is optional in V1.
+	if spec.CSI.Enable {
+		config[csiEndpointEnvVar] = spec.GetCSIEndpoint(csiv1)
+		config[csiVersionEnvVar] = spec.GetCSIVersion(csiv1)
 	}
 
 	// Since we're running in k8s, always listen on the the scheduler extender
@@ -210,24 +207,75 @@ func configFromSpec(spec storageosv1.StorageOSClusterSpec, csiv1 bool, nodev2 bo
 	// allows users to toggle the feature without restarting the cluster.
 	config[k8sSchedulerExtenderEnvVar] = "true"
 
-	// CSI is always enabled in V2, optional in V1.
-	if nodev2 || spec.CSI.Enable {
-		config[csiEndpointEnvVar] = spec.GetCSIEndpoint(csiv1)
-		config[csiVersionEnvVar] = spec.GetCSIVersion(csiv1)
+	// If kubelet is running in a container, sharedDir should be set.
+	if spec.SharedDir != "" {
+		config[deviceDirEnvVar] = fmt.Sprintf("%s/devices", spec.SharedDir)
 	}
+
+	config[logFormatEnvVar] = "text"
+	config[logLevelEnvVar] = "info"
+	if spec.Debug {
+		config[logLevelEnvVar] = debugVal
+	}
+
+	return config
+}
+
+func v2ConfigFromSpec(spec storageosv1.StorageOSClusterSpec) map[string]string {
+	config := make(map[string]string)
+
+	// ETCD_ENDPOINTS must be set to a comma separated list of endpoints.
+	config[etcdEndpointsEnvVar] = spec.KVBackend.Address
+
+	// Append Etcd TLS config, if given.  Volumes are created in Podspec.
+	if spec.TLSEtcdSecretRefName != "" && spec.TLSEtcdSecretRefNamespace != "" {
+		config = addEtcdTLSConfig(config, true)
+	}
+
+	// Always show telemetry and feature options to ensure they're visble.
+	config[disableTelemetryEnvVar] = strconv.FormatBool(spec.DisableTelemetry)
+
+	// TODO: separte CR items for version check and crash reports.  Use
+	// Telemetry to enable/disable everything for now.
+	config[disableVersionCheckEnvVar] = strconv.FormatBool(spec.DisableTelemetry)
+	config[disableCrashReportingEnvVar] = strconv.FormatBool(spec.DisableTelemetry)
+
+	// Features
+	config[disableFencingEnvVar] = strconv.FormatBool(spec.DisableFencing)
+
+	// DISABLE_TCMU and FORCE_TCMU should not be set unless under advice from
+	// support.  Only show the vars if set.
+	if spec.DisableTCMU {
+		config[disableTCMUEnvVar] = strconv.FormatBool(spec.DisableTCMU)
+	}
+	if spec.ForceTCMU {
+		config[forceTCMUEnvVar] = strconv.FormatBool(spec.ForceTCMU)
+	}
+
+	config[v2NamespaceEnvVar] = spec.GetResourceNS()
+
+	if spec.K8sDistro != "" {
+		config[k8sDistroEnvVar] = spec.K8sDistro
+	}
+
+	// CSI is always enabled.
+	config[csiEndpointEnvVar] = spec.GetCSIEndpoint(true)
+	config[csiVersionEnvVar] = spec.GetCSIVersion(true)
+
+	// Since we're running in k8s, always listen on the the scheduler extender
+	// api endpoints.  The feature can be disabled with the operator.  This
+	// allows users to toggle the feature without restarting the cluster.
+	config[k8sSchedulerExtenderEnvVar] = "true"
 
 	// If kubelet is running in a container, sharedDir should be set.
 	if spec.SharedDir != "" {
 		config[deviceDirEnvVar] = fmt.Sprintf("%s/devices", spec.SharedDir)
 	}
 
+	config[logFormatEnvVar] = "json"
 	config[logLevelEnvVar] = "info"
 	if spec.Debug {
 		config[logLevelEnvVar] = debugVal
-	}
-	config[logFormatEnvVar] = "text"
-	if nodev2 {
-		config[logFormatEnvVar] = "json"
 	}
 
 	return config

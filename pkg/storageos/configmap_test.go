@@ -266,7 +266,7 @@ func Test_configFromSpec(t *testing.T) {
 			wantbase: v2DefaultConfig,
 		},
 		{
-			name: "v2 csi v0 - cp will reject",
+			name: "v2 csi v0 - override to csi v1",
 			spec: storageosv1.StorageOSClusterSpec{
 				CSI: storageosv1.StorageOSClusterCSI{
 					Enable: true,
@@ -276,8 +276,8 @@ func Test_configFromSpec(t *testing.T) {
 			nodev2:   true,
 			wantbase: v2DefaultConfig,
 			wantcustom: map[string]string{
-				csiEndpointEnvVar: "unix:///var/lib/kubelet/plugins/storageos/csi.sock",
-				csiVersionEnvVar:  "v0",
+				csiEndpointEnvVar: "unix:///var/lib/kubelet/plugins_registry/storageos/csi.sock",
+				csiVersionEnvVar:  "v1",
 			},
 		},
 		{
