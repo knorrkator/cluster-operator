@@ -280,8 +280,6 @@ main() {
         # Wait for all the OLM resources to be created and ready.
         sleep 20
 
-        install_etcd
-
         install_storageos_operator
 
         # Install storageos with default configurations.
@@ -296,6 +294,9 @@ main() {
 
         uninstall_storageos
     else
+
+        install_etcd
+
         # Add taint on the node.
         kubectl taint nodes $NODE_NAME key=value:NoSchedule
 
@@ -330,6 +331,9 @@ main() {
         operator-sdk-e2e-cleanup
 
         operator-sdk test local ./test/e2e --go-test-flags "-v -tags intree" --namespace storageos-operator
+        operator-sdk-e2e-cleanup
+
+        operator-sdk test local ./test/e2e --go-test-flags "-v -tags v2" --namespace storageos-operator
         operator-sdk-e2e-cleanup
 
         # echo "**** Resource details for storageos-operator namespace ****"
