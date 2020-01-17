@@ -5,6 +5,7 @@ package e2e
 import (
 	goctx "context"
 	"testing"
+	"time"
 
 	framework "github.com/operator-framework/operator-sdk/pkg/test"
 	corev1 "k8s.io/api/core/v1"
@@ -62,12 +63,18 @@ func TestClusterCSINodeV2(t *testing.T) {
 
 	f := framework.Global
 
+	start := time.Now()
+	for {
 	err = f.Client.Get(goctx.TODO(), types.NamespacedName{Name: testutil.TestClusterCRName, Namespace: namespace}, testStorageOS)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// TODO - Status not confirmed working yet.
+	if testStorageOS.Status.Phase == storageos.ClusterPhaseRunning || time.Now().After(start.Add(20*time.Second)) {
+		break
+	}
+}
+	// TODO - Status not confirmed working yet.  Assume started after waiting
+	// for the timeout for now.
 	// testutil.ClusterStatusCheck(t, testStorageOS.Status, 1)
 
 	daemonset, err := f.KubeClient.AppsV1().DaemonSets(resourceNS).Get("storageos-daemonset", metav1.GetOptions{})
