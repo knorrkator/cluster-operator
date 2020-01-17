@@ -57,11 +57,16 @@ func TestClusterCSIDeployment(t *testing.T) {
 
 	f := framework.Global
 
-	err = f.Client.Get(goctx.TODO(), types.NamespacedName{Name: testutil.TestClusterCRName, Namespace: namespace}, testStorageOS)
-	if err != nil {
-		t.Fatal(err)
+	start := time.Now()
+	for {
+		err = f.Client.Get(goctx.TODO(), types.NamespacedName{Name: testutil.TestClusterCRName, Namespace: namespace}, testStorageOS)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if testStorageOS.Status.Phase == storageos.ClusterPhaseRunning || time.Now().After(start.Add(20*time.Second)) {
+			break
+		}
 	}
-
 	testutil.ClusterStatusCheck(t, testStorageOS.Status, 1)
 
 	daemonset, err := f.KubeClient.AppsV1().DaemonSets(resourceNS).Get("storageos-daemonset", metav1.GetOptions{})
